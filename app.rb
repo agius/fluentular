@@ -1,6 +1,7 @@
 # enoding: utf-8
 
 require 'sinatra'
+require 'sinatra/json'
 require 'fluent/version'
 require 'fluent/log'
 require 'fluent/config'
@@ -14,21 +15,21 @@ get '/' do
 end
 
 get '/parse' do
-  @regexp      = params[:regexp].gsub(/^\/(.+)\/$/, '\1')
+  @regexp      = params[:regexp].gsub(%r{^\/(.+)\/$}, '\1')
   @input       = params[:input]
   @time_format = params[:time_format]
   @error       = nil
 
   begin
     parser = Fluent::TextParser::RegexpParser.new(Regexp.new(@regexp))
-    parser.configure('time_format' => @time_format) if not @time_format.empty?
+    parser.configure('time_format' => @time_format) unless @time_format.empty?
     @parsed_time, @parsed = parser.call(@input)
   rescue Fluent::TextParser::ParserError, RegexpError => e
     @error = e
     @parsed_time = @parsed = nil
   end
 
-  haml :index
+  json parsed_time: @parsed_time, parsed: @parsed.to_json, error: @error
 end
 
 __END__
@@ -44,6 +45,9 @@ __END__
     %link(rel='stylesheet' href='//cdnjs.cloudflare.com/ajax/libs/foundation/5.5.0/css/normalize.min.css')
     %link(rel='stylesheet' href='//cdnjs.cloudflare.com/ajax/libs/foundation/5.5.0/css/foundation.min.css')
     %script(src='//cdnjs.cloudflare.com/ajax/libs/modernizr/2.8.3/modernizr.min.js')
+    %script(src='//cdnjs.cloudflare.com/ajax/libs/react/0.13.1/JSXTransformer.js')
+    %script(src='//cdnjs.cloudflare.com/ajax/libs/react/0.13.1/react.min.js')
+    %script(src='//code.jquery.com/jquery-1.10.0.min.js')
     :javascript
       var _gaq = _gaq || [];
       _gaq.push(['_setAccount', "#{ENV['UA_CODE']}"]);
@@ -54,6 +58,78 @@ __END__
         ga.src = ('https:' == document.location.protocol ? 'https://ssl' : 'http://www') + '.google-analytics.com/ga.js';
         var s = document.getElementsByTagName('script')[0]; s.parentNode.insertBefore(ga, s);
       })();
+    %script(type='text/jsx')
+      :plain
+        var ErrorDisplay = React.createClass({
+          render: function () {
+            return (
+              <span className="alert-box alert radius">
+                <i className="fa fa-exclamation-triangle"></i> Error: {this.props.error}
+              </span>
+            );
+          }
+        });
+
+        var Form = React.createClass({
+          getInitialState: function() {
+            return { error: null };
+          },
+          onSubmit: function(e) {
+            e.preventDefault();
+            var regexp = React.findDOMNode(this.refs.regexp).value.trim();
+            var input  = React.findDOMNode(this.refs.input).value.trim();
+            var time_format = React.findDOMNode(this.refs.time_format).value.trim();
+            if (!regexp || !input) {
+              return;
+            }
+
+            $.ajax({
+              url: '/parse',
+              dataType: 'json',
+              type: 'GET',
+              data: { regexp: regexp, input: input, time_format: time_format },
+              success: function(data) {
+                this.setState(data);
+                console.log(data);
+              }.bind(this),
+              error: function(xhr, status, err) {
+                this.setState({ error: err.toString()});
+                console.error(status, err.toString());
+              }.bind(this)
+            });
+            return;
+          },
+          render: function() {
+            var errorDisplay;
+            if (this.state.error != null) {
+              errorDisplay = <ErrorDisplay error={this.state.error} />
+            }
+            return (
+              <form method="GET" onSubmit={this.onSubmit}>
+                <label><i className="fa fa-code"></i>Regular Expression</label>
+                <textarea ref="regexp" name="regexp" rows="5"></textarea>
+                <label><i className="fa fa-quote-left"></i>Test String</label>
+                <textarea ref="input" name="input" rows="5"></textarea>
+                <label><i className="fa fa-clock-o"></i>
+                  Custom Time Format (see also ruby document;
+                  <a href="http://docs.ruby-lang.org/en/2.2.0/Time.html#method-i-strptime">strptime</a>
+                  )
+                </label>
+                <textarea ref="time_format" name="time_format" rows="1"></textarea>
+                {errorDisplay}
+                <div className="row">
+                  <div className="large-2 large-centered columns">
+                    <input className="radius button" type="submit" value="Parse" />
+                  </div>
+                </div>
+              </form>
+            )
+          }
+        });
+        React.render(
+          <Form />,
+          document.getElementById('form')
+        );
     :css
       @import url(http://fonts.googleapis.com/css?family=Squada+One);
       body {
@@ -87,6 +163,7 @@ __END__
         color: #ff79c6;
       }
   %body
+    %div#greeting
     %a(href='http://github.com/Tomohiro/fluentular')
       %img.github(src='http://s3.amazonaws.com/github/ribbons/forkme_right_red_aa0000.png' alt='Fork me on GitHub')
 
@@ -117,6 +194,7 @@ __END__
 @@ index
 %div.row
   %section.small-12.medium-8.columns
+    #form
     %form(method='GET' action='/parse')
       %label
         %i.fa.fa-code
