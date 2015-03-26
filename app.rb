@@ -14,11 +14,16 @@ get '/' do
   haml :index
 end
 
-get '/parse' do
+get '/parse.?:format?' do
+  # Request params
   @regexp      = params[:regexp].gsub(%r{^\/(.+)\/$}, '\1')
   @input       = params[:input]
   @time_format = params[:time_format]
+
+  # Response data
   @error       = nil
+  @parsed      = {}
+  @parsed_time = nil
 
   begin
     parser = Fluent::TextParser::RegexpParser.new(Regexp.new(@regexp))
@@ -26,15 +31,18 @@ get '/parse' do
     @parsed_time, @parsed = parser.call(@input)
   rescue Fluent::TextParser::ParserError, RegexpError => e
     @error = e
-    @parsed_time = @parsed = nil
   end
 
-  json parsed_time: @parsed_time, parsed: @parsed.to_json, error: @error
+  if params[:format] == 'json'
+    json parsed_time: @parsed_time, parsed: @parsed.to_json, error: @error
+  else
+    haml :index
+  end
 end
 
 __END__
 
-@@ layout
+@@ index
 !!!
 %html
   %head
@@ -47,7 +55,8 @@ __END__
     %script(src='//cdnjs.cloudflare.com/ajax/libs/modernizr/2.8.3/modernizr.min.js')
     %script(src='//cdnjs.cloudflare.com/ajax/libs/react/0.13.1/JSXTransformer.js')
     %script(src='//cdnjs.cloudflare.com/ajax/libs/react/0.13.1/react.min.js')
-    %script(src='//code.jquery.com/jquery-1.10.0.min.js')
+    %script(src='//cdnjs.cloudflare.com/ajax/libs/superagent/0.15.7/superagent.min.js')
+    %script(src='//cdnjs.cloudflare.com/ajax/libs/URI.js/1.11.2/URI.min.js')
     :javascript
       var _gaq = _gaq || [];
       _gaq.push(['_setAccount', "#{ENV['UA_CODE']}"]);
@@ -60,7 +69,77 @@ __END__
       })();
     %script(type='text/jsx')
       :plain
-        var ErrorDisplay = React.createClass({
+        var request = window.superagent;
+
+        var FluentularApp = React.createClass({
+          getInitialState: function() {
+            return { error: null };
+          },
+          componentDidMount: function() {
+            var uri = URI.parse(location.href);
+            if (uri.query == null) {
+              return;
+            }
+
+            var data = URI.parseQuery(uri.query);
+            request.get(
+              '/parse.json', data, (res) => {
+                this.setProps(data);
+                this.setState(res.body);
+            });
+          },
+          onSubmit: function(e) {
+            e.preventDefault();
+            var regexp      = React.findDOMNode(this.refs.regexp).value;
+            var input       = React.findDOMNode(this.refs.input).value;
+            var time_format = React.findDOMNode(this.refs.time_format).value;
+            if (!regexp || !input) {
+              return;
+            }
+
+            request.get(
+              '/parse.json',
+              { regexp: regexp, input: input, time_format: time_format }, (res) => {
+                this.setState(res.body);
+            });
+          },
+          render: function() {
+            var errorMessage;
+            if (this.state.error != null) {
+              errorMessage = <ErrorMessage error={this.state.error} />
+            }
+            return (
+              <div className="row">
+                <section className="small-12 medium-8 columns">
+                  <form onSubmit={this.parse}>
+                    <label><i className="fa fa-code"></i>Regular Expression</label>
+                    <textarea ref="regexp" name="regexp" rows="5" value={this.props.regexp}></textarea>
+                    <label><i className="fa fa-quote-left"></i>Test String</label>
+                    <textarea ref="input" name="input" rows="5" value={this.props.input}></textarea>
+                    <label><i className="fa fa-clock-o"></i>
+                      Custom Time Format (see also ruby document;
+                      <a href="http://docs.ruby-lang.org/en/2.2.0/Time.html#method-i-strptime">strptime</a>
+                      )
+                    </label>
+                    <textarea ref="time_format" name="time_format" rows="1" value={this.props.time_format}></textarea>
+                    {errorMessage}
+                    <div className="row">
+                      <div className="large-2 large-centered columns">
+                        <input className="radius button" type="submit" value="Parse" />
+                      </div>
+                    </div>
+                  </form>
+                </section>
+
+                <aside className="small-12 medium-4 columns">
+                  <Panel />
+                </aside>
+              </div>
+            );
+          }
+        });
+
+        var ErrorMessage = React.createClass({
           render: function () {
             return (
               <span className="alert-box alert radius">
@@ -70,65 +149,28 @@ __END__
           }
         });
 
-        var Form = React.createClass({
-          getInitialState: function() {
-            return { error: null };
-          },
-          onSubmit: function(e) {
-            e.preventDefault();
-            var regexp = React.findDOMNode(this.refs.regexp).value.trim();
-            var input  = React.findDOMNode(this.refs.input).value.trim();
-            var time_format = React.findDOMNode(this.refs.time_format).value.trim();
-            if (!regexp || !input) {
-              return;
-            }
-
-            $.ajax({
-              url: '/parse',
-              dataType: 'json',
-              type: 'GET',
-              data: { regexp: regexp, input: input, time_format: time_format },
-              success: function(data) {
-                this.setState(data);
-                console.log(data);
-              }.bind(this),
-              error: function(xhr, status, err) {
-                this.setState({ error: err.toString()});
-                console.error(status, err.toString());
-              }.bind(this)
-            });
-            return;
-          },
+        var Panel = React.createClass({
           render: function() {
-            var errorDisplay;
-            if (this.state.error != null) {
-              errorDisplay = <ErrorDisplay error={this.state.error} />
-            }
             return (
-              <form method="GET" onSubmit={this.onSubmit}>
-                <label><i className="fa fa-code"></i>Regular Expression</label>
-                <textarea ref="regexp" name="regexp" rows="5"></textarea>
-                <label><i className="fa fa-quote-left"></i>Test String</label>
-                <textarea ref="input" name="input" rows="5"></textarea>
-                <label><i className="fa fa-clock-o"></i>
-                  Custom Time Format (see also ruby document;
-                  <a href="http://docs.ruby-lang.org/en/2.2.0/Time.html#method-i-strptime">strptime</a>
-                  )
-                </label>
-                <textarea ref="time_format" name="time_format" rows="1"></textarea>
-                {errorDisplay}
-                <div className="row">
-                  <div className="large-2 large-centered columns">
-                    <input className="radius button" type="submit" value="Parse" />
-                  </div>
-                </div>
-              </form>
-            )
+              <div className="panel callout radius">
+                <h4>Example (Aapache)</h4>
+                <h6>Regular Expression:</h6>
+                <pre>
+                  ^(?&lt;host&gt;[^ ]*) [^ ]* (?&lt;user&gt;[^ ]*) \[(?&lt;time&gt;[^\]]*)\] "(?&lt;method&gt;\S+)(?: +(?&lt;path&gt;[^ ]*) +\S*)?" (?&lt;code&gt;[^ ]*) (?&lt;size&gt;[^ ]*)(?: "(?&lt;referer&gt;[^\"]*)" "(?&lt;agent&gt;[^\"]*)")?$
+                </pre>
+                <br />
+                <h6>Time Format:</h6>
+                <pre>
+                  %d/%b/%Y:%H:%M:%S %z
+                </pre>
+              </div>
+            );
           }
         });
+
         React.render(
-          <Form />,
-          document.getElementById('form')
+          <FluentularApp />,
+          document.getElementById('app')
         );
     :css
       @import url(http://fonts.googleapis.com/css?family=Squada+One);
@@ -143,16 +185,6 @@ __END__
         margin: 40px 0px 20px;
         border-bottom: 1px solid #eee;
       }
-      pre#code-example {
-        padding: 0.125rem 0.3125rem 0.0625rem;
-        background-color: #f8f8f8;
-        border: 1px solid #dfdfdf;
-        white-space: pre-wrap;
-      }
-      code {
-        padding: 0px;
-        border: none;
-      }
       img.github {
         position: absolute;
         top: 0;
@@ -163,8 +195,7 @@ __END__
         color: #ff79c6;
       }
   %body
-    %div#greeting
-    %a(href='http://github.com/Tomohiro/fluentular')
+    %a(href='https://github.com/Tomohiro/fluentular')
       %img.github(src='http://s3.amazonaws.com/github/ribbons/forkme_right_red_aa0000.png' alt='Fork me on GitHub')
 
     %header.row.small-centered.columns
@@ -174,8 +205,68 @@ __END__
           %img(src='https://img.shields.io/badge/fluentd-v#{Fluent::VERSION}-orange.svg?style=flat-square')
         %h4 a Fluentd regular expression editor
 
-    %article
-      = yield
+    %article#app
+
+    %div.row
+      %section.small-12.small-centered.columns
+        %h3
+          %i.fa.fa-file-code-o
+          Configuration
+        %p Copy and paste to <code>fluent.conf</code> or <code>td-agent.conf</code>
+        %div.panel
+          & &lt;source&gt;
+          %br/
+          & &nbsp;&nbsp;type tail
+          %br/
+          & &nbsp;&nbsp;path /var/log/foo/bar.log
+          %br/
+          & &nbsp;&nbsp;pos_file /var/log/td-agent/foo-bar.log.pos
+          %br/
+          & &nbsp;&nbsp;tag foo.bar
+          %br/
+          & &nbsp;&nbsp;format /#{@regexp}/
+          %br/
+          - if @time_format and !@time_format.empty?
+            & &nbsp;&nbsp;time_format #{@time_format}
+            %br/
+          & &lt;/source&gt;
+
+    %div.row
+      %section.small-12.small-centered.columns
+        %h3
+          %i.fa.fa-crosshairs
+          Data Inspector
+        %h4 Attributes
+        %table.small-12
+          %thead
+            %tr
+              %th.small-4 Key
+              %th.small-8 Value
+          %tbody
+            - if @parsed
+              %tr
+                %th.small-4 time
+                %td.small-8 #{Time.at(@parsed_time).strftime("%Y/%m/%d %H:%M:%S %z")}
+            - else
+              %tr
+                %th.small-4
+                %td.small-12
+        %h4 Records
+        %table.small-12
+          %thead
+            %tr
+              %th.small-4 Key
+              %th.small-8 Value
+          %tbody
+            - if @parsed
+              - @parsed.each do |key, value|
+                %tr
+                  %th&= key
+                  %td&= value
+            - else
+              %tr
+                %th
+                %td
 
     %footer.row.small-centered.columns
       %section.small-12.medium-5.columns
@@ -190,110 +281,3 @@ __END__
           %a(href='http://www.sinatrarb.com/') Sinatra
           Hosted on
           %a(href='http://heroku.com') Heroku
-
-@@ index
-%div.row
-  %section.small-12.medium-8.columns
-    #form
-    %form(method='GET' action='/parse')
-      %label
-        %i.fa.fa-code
-        Regular Expression
-      %textarea(name='regexp' rows=5)&= @regexp
-
-      %label
-        %i.fa.fa-quote-left
-        Test String
-      %textarea(name='input' rows=5)&= @input
-
-      %label
-        %i.fa.fa-clock-o
-        Custom Time Format (see also ruby document;
-        %a(href='http://docs.ruby-lang.org/en/2.1.0/Time.html#method-i-strptime') strptime)
-      %textarea(name='time_format' rows=1)&= @time_format
-
-      - if @error
-        %span.alert-box.alert.radius
-          %i.fa.fa-exclamation-triangle
-          Error:
-          &= @error
-
-      %div.row
-        %div.large-2.large-centered.columns
-          %input.radius.button(type='submit' value='Parse')
-
-
-  %aside.small-12.medium-4.columns
-    %div.panel.callout.radius
-      %h4 Example (Apache)
-      %h6
-        Regular expression:
-      %pre#code-example
-        %code
-          & ^(?&lt;host&gt;[^ ]*) [^ ]* (?&lt;user&gt;[^ ]*) \[(?&lt;time&gt;[^\]]*)\] "(?&lt;method&gt;\S+)(?: +(?&lt;path&gt;[^ ]*) +\S*)?" (?&lt;code&gt;[^ ]*) (?&lt;size&gt;[^ ]*)(?: "(?&lt;referer&gt;[^\"]*)" "(?&lt;agent&gt;[^\"]*)")?$
-      %h6
-        Time Format:
-      %pre#code-example
-        %code
-          & %d/%b/%Y:%H:%M:%S %z
-
-%div.row
-  %section.small-12.small-centered.columns
-    %h3
-      %i.fa.fa-file-code-o
-      Configuration
-    %p Copy and paste to <code>fluent.conf</code> or <code>td-agent.conf</code>
-    %div.panel
-      & &lt;source&gt;
-      %br/
-      & &nbsp;&nbsp;type tail
-      %br/
-      & &nbsp;&nbsp;path /var/log/foo/bar.log
-      %br/
-      & &nbsp;&nbsp;pos_file /var/log/td-agent/foo-bar.log.pos
-      %br/
-      & &nbsp;&nbsp;tag foo.bar
-      %br/
-      & &nbsp;&nbsp;format /#{@regexp}/
-      %br/
-      - if @time_format and !@time_format.empty?
-        & &nbsp;&nbsp;time_format #{@time_format}
-        %br/
-      & &lt;/source&gt;
-
-%div.row
-  %section.small-12.small-centered.columns
-    %h3
-      %i.fa.fa-crosshairs
-      Data Inspector
-    %h4 Attributes
-    %table.small-12
-      %thead
-        %tr
-          %th.small-4 Key
-          %th.small-8 Value
-      %tbody
-        - if @parsed
-          %tr
-            %th.small-4 time
-            %td.small-8 #{Time.at(@parsed_time).strftime("%Y/%m/%d %H:%M:%S %z")}
-        - else
-          %tr
-            %th.small-4
-            %td.small-12
-    %h4 Records
-    %table.small-12
-      %thead
-        %tr
-          %th.small-4 Key
-          %th.small-8 Value
-      %tbody
-        - if @parsed
-          - @parsed.each do |key, value|
-            %tr
-              %th&= key
-              %td&= value
-        - else
-          %tr
-            %th
-            %td
