@@ -88,6 +88,11 @@ __END__
                 this.setState(res.body);
             });
           },
+          onChangeTextArea: function(e) {
+            var data = this.props;
+            data[e.target.name] = e.target.value;
+            this.setProps(data);
+          },
           onSubmit: function(e) {
             e.preventDefault();
             var regexp      = React.findDOMNode(this.refs.regexp).value;
@@ -109,31 +114,33 @@ __END__
               errorMessage = <ErrorMessage error={this.state.error} />
             }
             return (
-              <div className="row">
-                <section className="small-12 medium-8 columns">
-                  <form onSubmit={this.parse}>
-                    <label><i className="fa fa-code"></i>Regular Expression</label>
-                    <textarea ref="regexp" name="regexp" rows="5" value={this.props.regexp}></textarea>
-                    <label><i className="fa fa-quote-left"></i>Test String</label>
-                    <textarea ref="input" name="input" rows="5" value={this.props.input}></textarea>
-                    <label><i className="fa fa-clock-o"></i>
-                      Custom Time Format (see also ruby document;
-                      <a href="http://docs.ruby-lang.org/en/2.2.0/Time.html#method-i-strptime">strptime</a>
-                      )
-                    </label>
-                    <textarea ref="time_format" name="time_format" rows="1" value={this.props.time_format}></textarea>
-                    {errorMessage}
-                    <div className="row">
-                      <div className="large-2 large-centered columns">
-                        <input className="radius button" type="submit" value="Parse" />
+              <div class="container">
+                <div className="row">
+                  <section className="small-12 medium-8 columns">
+                    <form action="/parse" onSubmit={this.parse}>
+                      <label><i className="fa fa-code"></i>Regular Expression</label>
+                      <textarea ref="regexp" name="regexp" rows="5" value={this.props.regexp} onChange={this.onChangeTextArea}></textarea>
+                      <label><i className="fa fa-quote-left"></i>Test String</label>
+                      <textarea ref="input" name="input" rows="5" value={this.props.input} onChange={this.onChangeTextArea}></textarea>
+                      <label><i className="fa fa-clock-o"></i>
+                        Custom Time Format (see also ruby document;
+                        <a href="http://docs.ruby-lang.org/en/2.2.0/Time.html#method-i-strptime">strptime</a>
+                        )
+                      </label>
+                      <textarea ref="time_format" name="time_format" rows="1" value={this.props.time_format} onChange={this.onChangeTextArea}></textarea>
+                      {errorMessage}
+                      <div className="row">
+                        <div className="large-2 large-centered columns">
+                          <input className="radius button" type="submit" value="Parse" />
+                        </div>
                       </div>
-                    </div>
-                  </form>
-                </section>
+                    </form>
+                  </section>
 
-                <aside className="small-12 medium-4 columns">
                   <Panel />
-                </aside>
+                </div>
+
+                <Configuration regexp={this.props.regexp} time_format={this.props.time_format}/>
               </div>
             );
           }
@@ -152,19 +159,61 @@ __END__
         var Panel = React.createClass({
           render: function() {
             return (
-              <div className="panel callout radius">
-                <h4>Example (Aapache)</h4>
-                <h6>Regular Expression:</h6>
-                <pre>
-                  ^(?&lt;host&gt;[^ ]*) [^ ]* (?&lt;user&gt;[^ ]*) \[(?&lt;time&gt;[^\]]*)\] "(?&lt;method&gt;\S+)(?: +(?&lt;path&gt;[^ ]*) +\S*)?" (?&lt;code&gt;[^ ]*) (?&lt;size&gt;[^ ]*)(?: "(?&lt;referer&gt;[^\"]*)" "(?&lt;agent&gt;[^\"]*)")?$
-                </pre>
-                <br />
-                <h6>Time Format:</h6>
-                <pre>
-                  %d/%b/%Y:%H:%M:%S %z
-                </pre>
+              <aside className="small-12 medium-4 columns">
+                <div className="panel callout radius">
+                  <h4>Example (Aapache)</h4>
+                  <h6>Regular Expression:</h6>
+                  <pre>
+                    ^(?&lt;host&gt;[^ ]*) [^ ]* (?&lt;user&gt;[^ ]*) \[(?&lt;time&gt;[^\]]*)\] "(?&lt;method&gt;\S+)(?: +(?&lt;path&gt;[^ ]*) +\S*)?" (?&lt;code&gt;[^ ]*) (?&lt;size&gt;[^ ]*)(?: "(?&lt;referer&gt;[^\"]*)" "(?&lt;agent&gt;[^\"]*)")?$
+                  </pre>
+                  <br />
+                  <h6>Time Format:</h6>
+                  <pre>
+                    %d/%b/%Y:%H:%M:%S %z
+                  </pre>
+                </div>
+              </aside>
+            );
+          }
+        });
+
+        var Configuration = React.createClass({
+          render: function() {
+            var time_format_template;
+            if (this.props.time_format != null && this.props.time_format != '') {
+              time_format_template = <TimeFormatTemplate time_format={this.props.time_format} />
+            }
+
+            return (
+              <div className="row">
+                <section className="small-12 small-centered columns">
+                  <h3><i className="fa fa-file-code-o"></i> Configuration</h3>
+                  <p>Copy and paste to <code>fluent.conf</code> or <code>td-agent.conf</code></p>
+                  <div className="panel">
+                    &lt;/source&gt;
+                    <br />
+                    &nbsp;&nbsp;type tail
+                    <br />
+                    &nbsp;&nbsp;path /var/log/foo/bar.log
+                    <br />
+                    &nbsp;&nbsp;pos_file /var/log/td-agent/foo-bar.log.pos
+                    <br />
+                    &nbsp;&nbsp;tag foo.bar
+                    <div>
+                      &nbsp;&nbsp;format /{this.props.regexp}/
+                    </div>
+                    {time_format_template}
+                    &lt;/source&gt;
+                  </div>
+                </section>
               </div>
             );
+          }
+        });
+
+        var TimeFormatTemplate = React.createClass({
+          render: function() {
+            return <div>&nbsp;&nbsp;time_format {this.props.time_format}</div>;
           }
         });
 
@@ -206,30 +255,6 @@ __END__
         %h4 a Fluentd regular expression editor
 
     %article#app
-
-    %div.row
-      %section.small-12.small-centered.columns
-        %h3
-          %i.fa.fa-file-code-o
-          Configuration
-        %p Copy and paste to <code>fluent.conf</code> or <code>td-agent.conf</code>
-        %div.panel
-          & &lt;source&gt;
-          %br/
-          & &nbsp;&nbsp;type tail
-          %br/
-          & &nbsp;&nbsp;path /var/log/foo/bar.log
-          %br/
-          & &nbsp;&nbsp;pos_file /var/log/td-agent/foo-bar.log.pos
-          %br/
-          & &nbsp;&nbsp;tag foo.bar
-          %br/
-          & &nbsp;&nbsp;format /#{@regexp}/
-          %br/
-          - if @time_format and !@time_format.empty?
-            & &nbsp;&nbsp;time_format #{@time_format}
-            %br/
-          & &lt;/source&gt;
 
     %div.row
       %section.small-12.small-centered.columns
