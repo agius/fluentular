@@ -23,18 +23,19 @@ get '/parse.?:format?' do
   # Response data
   @error       = nil
   @parsed      = {}
-  @parsed_time = nil
+  @parsed_time = {}
 
   begin
     parser = Fluent::TextParser::RegexpParser.new(Regexp.new(@regexp))
     parser.configure('time_format' => @time_format) unless @time_format.empty?
     @parsed_time, @parsed = parser.call(@input)
+    @parsed_time = [{time: @parsed_time}]
   rescue Fluent::TextParser::ParserError, RegexpError => e
     @error = e
   end
 
   if params[:format] == 'json'
-    json parsed_time: @parsed_time, parsed: @parsed.to_json, error: @error
+    json parsed_time: @parsed_time.to_json, parsed: @parsed.to_json, error: @error
   else
     haml :index
   end
@@ -57,6 +58,7 @@ __END__
     %script(src='//cdnjs.cloudflare.com/ajax/libs/react/0.13.1/react.min.js')
     %script(src='//cdnjs.cloudflare.com/ajax/libs/superagent/0.15.7/superagent.min.js')
     %script(src='//cdnjs.cloudflare.com/ajax/libs/URI.js/1.11.2/URI.min.js')
+    %script(src='//cdnjs.cloudflare.com/ajax/libs/underscore.js/1.8.2/underscore-min.js')
     :javascript
       var _gaq = _gaq || [];
       _gaq.push(['_setAccount', "#{ENV['UA_CODE']}"]);
@@ -73,7 +75,7 @@ __END__
 
         var FluentularApp = React.createClass({
           getInitialState: function() {
-            return { error: null };
+            return { parsed_time: [], parsed: [], error: null };
           },
           componentDidMount: function() {
             var uri = URI.parse(location.href);
@@ -81,17 +83,16 @@ __END__
               return;
             }
 
-            var data = URI.parseQuery(uri.query);
+            var params = URI.parseQuery(uri.query);
             request.get(
-              '/parse.json', data, (res) => {
-                this.setProps(data);
-                this.setState(res.body);
+              '/parse.json', params, (res) => {
+                this.setState(_.extend(params, res.body));
             });
           },
           onChangeTextArea: function(e) {
-            var data = this.props;
-            data[e.target.name] = e.target.value;
-            this.setProps(data);
+            var state = this.state;
+            state[e.target.name] = e.target.value;
+            this.setState(state);
           },
           onSubmit: function(e) {
             e.preventDefault();
@@ -104,7 +105,8 @@ __END__
 
             request.get(
               '/parse.json',
-              { regexp: regexp, input: input, time_format: time_format }, (res) => {
+              { regexp: regexp, input: input, time_format: time_format },
+              (res) => {
                 this.setState(res.body);
             });
           },
@@ -119,15 +121,15 @@ __END__
                   <section className="small-12 medium-8 columns">
                     <form action="/parse" onSubmit={this.parse}>
                       <label><i className="fa fa-code"></i>Regular Expression</label>
-                      <textarea ref="regexp" name="regexp" rows="5" value={this.props.regexp} onChange={this.onChangeTextArea}></textarea>
+                      <textarea ref="regexp" name="regexp" rows="5" value={this.state.regexp} onChange={this.onChangeTextArea}></textarea>
                       <label><i className="fa fa-quote-left"></i>Test String</label>
-                      <textarea ref="input" name="input" rows="5" value={this.props.input} onChange={this.onChangeTextArea}></textarea>
+                      <textarea ref="input" name="input" rows="5" value={this.state.input} onChange={this.onChangeTextArea}></textarea>
                       <label><i className="fa fa-clock-o"></i>
                         Custom Time Format (see also ruby document;
                         <a href="http://docs.ruby-lang.org/en/2.2.0/Time.html#method-i-strptime">strptime</a>
                         )
                       </label>
-                      <textarea ref="time_format" name="time_format" rows="1" value={this.props.time_format} onChange={this.onChangeTextArea}></textarea>
+                      <textarea ref="time_format" name="time_format" rows="1" value={this.state.time_format} onChange={this.onChangeTextArea}></textarea>
                       {errorMessage}
                       <div className="row">
                         <div className="large-2 large-centered columns">
@@ -140,7 +142,8 @@ __END__
                   <Panel />
                 </div>
 
-                <Configuration regexp={this.props.regexp} time_format={this.props.time_format}/>
+                <ConfigurationTemplate regexp={this.state.regexp} time_format={this.state.time_format} />
+                <DataInspector attributes={this.state.parsed_time} records={this.state.parsed} />
               </div>
             );
           }
@@ -177,7 +180,7 @@ __END__
           }
         });
 
-        var Configuration = React.createClass({
+        var ConfigurationTemplate = React.createClass({
           render: function() {
             var time_format_template;
             if (this.props.time_format != null && this.props.time_format != '') {
@@ -214,6 +217,55 @@ __END__
         var TimeFormatTemplate = React.createClass({
           render: function() {
             return <div>&nbsp;&nbsp;time_format {this.props.time_format}</div>;
+          }
+        });
+
+        var DataInspector = React.createClass({
+          propTypes: {
+            records: React.PropTypes.array,
+            attribtues: React.PropTypes.array
+          },
+          render: function() {
+            return (
+              <div className="row">
+                <section className="small-12 small-centered columns">
+                  <h3><i className="fa fa-crosshairs"></i>Data Inspector</h3>
+                  <h4>Attributes</h4>
+                  <Table rows={this.props.attributes} />
+                  <h4>Records</h4>
+                  <Table rows={this.props.records} />
+                </section>
+              </div>
+            );
+          }
+        });
+
+        var Table = React.createClass({
+          propTypes: {
+            rows: React.PropTypes.array,
+          },
+          render: function() {
+            var rows = this.props.rows.map((row) => {
+              return (
+                <tr>
+                  <th>{row.key}</th>
+                  <td>{row.value}</td>
+                </tr>
+              );
+            });
+            return (
+              <table>
+                <thead>
+                  <tr>
+                    <th className="large-4 small-4">Key</th>
+                    <th className="large-8 small-8">Value</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows}
+                </tbody>
+              </table>
+            );
           }
         });
 
@@ -255,43 +307,6 @@ __END__
         %h4 a Fluentd regular expression editor
 
     %article#app
-
-    %div.row
-      %section.small-12.small-centered.columns
-        %h3
-          %i.fa.fa-crosshairs
-          Data Inspector
-        %h4 Attributes
-        %table.small-12
-          %thead
-            %tr
-              %th.small-4 Key
-              %th.small-8 Value
-          %tbody
-            - if @parsed
-              %tr
-                %th.small-4 time
-                %td.small-8 #{Time.at(@parsed_time).strftime("%Y/%m/%d %H:%M:%S %z")}
-            - else
-              %tr
-                %th.small-4
-                %td.small-12
-        %h4 Records
-        %table.small-12
-          %thead
-            %tr
-              %th.small-4 Key
-              %th.small-8 Value
-          %tbody
-            - if @parsed
-              - @parsed.each do |key, value|
-                %tr
-                  %th&= key
-                  %td&= value
-            - else
-              %tr
-                %th
-                %td
 
     %footer.row.small-centered.columns
       %section.small-12.medium-5.columns
